@@ -71,6 +71,7 @@ export class IndicatorService implements OnModuleInit {
     const tweets = await this.tweetModel
       .find({
         isIndicated: { $ne: true },
+        indicator: { $exists: false },
       })
       .sort({ 'tweetDetail.tweetCreatedAt': -1 })
       .limit(20);
@@ -87,13 +88,6 @@ export class IndicatorService implements OnModuleInit {
       this.bitcoinPrice = bitcoinPrice;
     }
 
-    // Mark all tweets as indicated immediately to prevent reprocessing
-    const tweetIds = tweets.map((tweet) => tweet._id);
-    await this.tweetModel.updateMany(
-      { _id: { $in: tweetIds } },
-      { $set: { isIndicated: true } },
-    );
-
     const bitcoinKeywords = ['btc', 'bitcoin'];
 
     for (const tweet of tweets) {
@@ -108,6 +102,10 @@ export class IndicatorService implements OnModuleInit {
           !isTextRelevant ||
           tweet?.tweetDetail?.entities?.media?.length === 0
         ) {
+          await this.tweetModel.updateOne(
+            { _id: tweet._id },
+            { $set: { isIndicated: true } },
+          );
           this.logger.log(
             `Tweet ${tweet.tweetDetail.id} is not bitcoin related`,
           );
@@ -150,6 +148,7 @@ export class IndicatorService implements OnModuleInit {
               { _id: tweet._id },
               {
                 $set: {
+                  isIndicated: true,
                   indicator: indicatorData,
                 },
               },
@@ -159,6 +158,10 @@ export class IndicatorService implements OnModuleInit {
               `Successfully analyzed and updated tweet ${tweet.tweetDetail.id}`,
             );
           } else {
+            await this.tweetModel.updateOne(
+              { _id: tweet._id },
+              { $set: { isIndicated: true } },
+            );
             this.logger.log(
               `Tweet ${tweet.tweetDetail.id} is not a valid trading signal`,
             );

@@ -15,8 +15,7 @@ export class AppService {
 
     return this.tweetModel
       .find({
-        isIndicated: true,
-        indicator: { $exists: true },
+        indicator: { $exists: true, $ne: null },
         'indicator.indicatedAt': { $gte: twentyFourHoursAgo },
       })
       .sort({ 'tweetDetail.tweetCreatedAt': -1 })
