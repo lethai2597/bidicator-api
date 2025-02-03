@@ -1,37 +1,74 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import mongoose, { HydratedDocument } from 'mongoose';
-import { TweetV2 } from 'twitter-api-v2';
+import { Document } from 'mongoose';
 
-export type TweetDocument = HydratedDocument<Tweet>;
-
-export interface TweetDetail {
-  id: string;
-  tweetCreatedAt: Date;
-  fullText: string;
-  user: {
+@Schema({ timestamps: true })
+export class Tweet extends Document {
+  @Prop({
+    type: {
+      id: String,
+      fullText: String,
+      tweetCreatedAt: Date,
+      user: {
+        id: String,
+        name: String,
+        profileImageUrlHttps: String,
+        screenName: String,
+      },
+      entities: {
+        media: [
+          {
+            mediaUrlHttps: String,
+          },
+        ],
+      },
+    },
+  })
+  tweetDetail: {
     id: string;
-    name: string;
-    profileImageUrlHttps: string;
-    screenName: string;
+    fullText: string;
+    tweetCreatedAt: Date;
+    user: {
+      id: string;
+      name: string;
+      profileImageUrlHttps: string;
+      screenName: string;
+    };
+    entities: {
+      media: {
+        mediaUrlHttps: string;
+      }[];
+    };
   };
-  entities: {
-    media: {
-      mediaUrlHttps: string;
-    }[];
-  };
-}
 
-@Schema({
-  collection: 'tweets',
-})
-export class Tweet {
-  @Prop({ type: mongoose.Schema.Types.Mixed })
-  tweetDetail: TweetDetail;
-
-  @Prop({ type: Boolean, default: false })
+  @Prop({ default: false })
   isIndicated: boolean;
+
+  @Prop({
+    type: Object,
+    default: undefined,
+  })
+  indicator?: {
+    type: string;
+    entry: number;
+    target: number;
+    stopLoss: number;
+    indicatedAt: Date;
+    timeframe: {
+      type: string;
+      duration: {
+        value: number;
+        unit: string;
+      };
+    };
+    confidence: number;
+    reasoning: string;
+  };
 }
 
 export const TweetSchema = SchemaFactory.createForClass(Tweet);
 
-TweetSchema.index({ 'tweetDetail.id': 1 }, { unique: true });
+// Add indexes
+TweetSchema.index({ 'tweetDetail.tweetCreatedAt': -1 });
+TweetSchema.index({ isIndicated: 1 });
+TweetSchema.index({ 'indicator.indicatedAt': -1 });
+TweetSchema.index({ 'tweetDetail.fullText': 'text' });

@@ -17,12 +17,14 @@ export class TwitterCrawlerService {
     @InjectModel(Tweet.name) private tweetModel: Model<Tweet>,
   ) {}
 
-  @Cron('0 0 * * *', {
+  @Cron('0 */2 * * *', {
     timeZone: 'UTC',
   })
   async crawlTweets() {
-    this.logger.log('Starting daily tweet crawl at UTC midnight');
+    this.logger.log('Starting bi-hourly tweet crawl');
     try {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
       for (const kol of TWITTER_KOLS) {
         const tweetsResponse = await this._getSocialData(kol.id);
 
@@ -30,6 +32,10 @@ export class TwitterCrawlerService {
 
         for (const tweetItem of tweetsResponse) {
           const tweetDate = new Date(tweetItem.tweet_created_at);
+
+          if (tweetDate < twentyFourHoursAgo) {
+            continue;
+          }
 
           const uniqueMediaUrls = tweetItem?.entities?.media
             ? [
@@ -72,14 +78,25 @@ export class TwitterCrawlerService {
         if (newTweetsBulk.length > 0) {
           await this.tweetModel.bulkWrite(newTweetsBulk);
           this.logger.log(
-            `${kol.username}: ${newTweetsBulk.length} new tweets saved to database`,
+            `${kol.username}: ${newTweetsBulk.length} new tweets (within 24h) saved to database`,
           );
         } else {
-          this.logger.log(`${kol.username}: No new tweets to save`);
+          this.logger.log(`${kol.username}: No new tweets within 24h to save`);
         }
       }
 
-      this.logger.log('Daily tweet crawl completed');
+      // Clean up old tweets
+      const deleteResult = await this.tweetModel.deleteMany({
+        'tweetDetail.tweetCreatedAt': { $lt: twentyFourHoursAgo },
+      });
+
+      if (deleteResult.deletedCount > 0) {
+        this.logger.log(
+          `Cleaned up ${deleteResult.deletedCount} tweets older than 24h`,
+        );
+      }
+
+      this.logger.log('Bi-hourly tweet crawl completed');
     } catch (error) {
       this.logger.error('Error crawling tweets: ', error);
     }

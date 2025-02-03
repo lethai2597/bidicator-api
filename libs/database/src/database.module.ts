@@ -1,8 +1,7 @@
-import { Module, DynamicModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Tweet, TweetSchema } from './schemas/tweet';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { Indicator, IndicatorSchema } from './schemas/indicator';
 
 @Module({
   imports: [
@@ -13,10 +12,7 @@ import { Indicator, IndicatorSchema } from './schemas/indicator';
       }),
       inject: [ConfigService],
     }),
-    MongooseModule.forFeature([
-      { name: Tweet.name, schema: TweetSchema },
-      { name: Indicator.name, schema: IndicatorSchema },
-    ]),
+    MongooseModule.forFeature([{ name: Tweet.name, schema: TweetSchema }]),
   ],
   exports: [MongooseModule],
 })
