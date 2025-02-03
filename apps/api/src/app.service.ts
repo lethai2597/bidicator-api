@@ -19,7 +19,7 @@ export class AppService {
         indicator: { $exists: true },
         'indicator.indicatedAt': { $gte: twentyFourHoursAgo },
       })
-      .sort({ 'indicator.indicatedAt': -1 })
+      .sort({ 'tweetDetail.tweetCreatedAt': -1 })
       .lean();
   }
 }
