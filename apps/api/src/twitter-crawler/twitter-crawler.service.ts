@@ -64,9 +64,6 @@ export class TwitterCrawlerService {
       for (const tweet of tweets) {
         const tweetDate = new Date(tweet.tweetCreatedAt);
         if (tweetDate < twentyFourHoursAgo) {
-          this.logger.log(
-            `Skipping old tweet from ${tweetDate.toISOString()} for ${kol.screenName}`,
-          );
           continue;
         }
 
@@ -91,11 +88,7 @@ export class TwitterCrawlerService {
           const bulkWriteResult =
             await this.tweetModel.bulkWrite(newTweetsBulk);
           this.logger.log(
-            `${kol.screenName}: Bulk write result:
-            - Matched: ${bulkWriteResult.matchedCount}
-            - Modified: ${bulkWriteResult.modifiedCount}
-            - Inserted: ${bulkWriteResult.insertedCount}
-            - Upserted: ${bulkWriteResult.upsertedCount}`,
+            `${kol.screenName}: Bulk write result: Matched: ${bulkWriteResult.matchedCount}, Modified: ${bulkWriteResult.modifiedCount}, Inserted: ${bulkWriteResult.insertedCount}, Upserted: ${bulkWriteResult.upsertedCount}`,
           );
         } catch (error) {
           this.logger.error(`Error saving tweets to database:`, error);
@@ -129,7 +122,6 @@ export class TwitterCrawlerService {
 
   private async _crawlUserTweets(kol: TwitterKol) {
     const url = 'https://api.x.com/graphql/Y9WM4Id6UcGFE8Z-hbnixw/UserTweets';
-    this.logger.log(`Fetching tweets for ${kol.screenName} (${kol.id})`);
 
     try {
       const variables = {

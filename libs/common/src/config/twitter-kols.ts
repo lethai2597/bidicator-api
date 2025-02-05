@@ -55,6 +55,26 @@ export const TWITTER_KOLS: TwitterKol[] = [
     screenName: 'tradegym',
     score: 100,
   },
+  {
+    id: '1371580061971795973',
+    screenName: 'duje_matic',
+    score: 100,
+  },
+  {
+    id: '978732571738755072',
+    screenName: 'TheMoonCarl',
+    score: 100,
+  },
+  {
+    id: '1205655929963700224',
+    screenName: 'ChartFreedom',
+    score: 100,
+  },
+  {
+    id: '976929593042063360',
+    screenName: 'Thecryptomist',
+    score: 100,
+  },
 ];
 
 export function getTwitterScoreByKolId(id: string): number {
