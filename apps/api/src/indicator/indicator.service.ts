@@ -401,14 +401,14 @@ Tweet: "${tweetText}"
 
       const message = `🚨 <b>New Trading Signal</b>
 
+<b>From:</b> <a href="https://twitter.com/${tweet.tweetDetail.user.screenName}">@${tweet.tweetDetail.user.screenName}</a>
 <b>Type:</b> ${analysis.type?.toUpperCase() || 'N/A'} 
 <b>Entry:</b> $${formatPrice(analysis.entry)}
 <b>Target:</b> $${formatPrice(analysis.takeProfit)}
 <b>Stop Loss:</b> $${formatPrice(analysis.stopLoss)}
 <b>Timeframe:</b> ${analysis.timeframe ? `${analysis.timeframe.duration.value} ${analysis.timeframe.duration.unit}(s)` : 'N/A'}
 <b>Confidence:</b> ${(analysis.confidence * 100).toFixed(1)}%
-
-🔗 <a href="https://bidicator.online">View Detail</a>
+<b>View Detail:</b> <a href="https://bidicator.online">Bidicator</a>
 `;
 
       const url = `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`;
@@ -422,7 +422,7 @@ Tweet: "${tweetText}"
           chat_id: this.telegramChatId,
           text: message,
           parse_mode: 'HTML',
-          disable_web_page_preview: false,
+          disable_web_page_preview: true,
         }),
       });
 
