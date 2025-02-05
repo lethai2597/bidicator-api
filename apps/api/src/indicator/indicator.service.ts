@@ -25,18 +25,29 @@ interface AIAnalysisResponse {
 @Injectable()
 export class IndicatorService implements OnModuleInit {
   private readonly logger = new Logger(IndicatorService.name);
-  private isProcessing = false;
-  private lastProcessedAt: Date = null;
   private readonly openai: OpenAI;
   private bitcoinPrice: string = '94000';
+  private readonly telegramBotToken: string;
+  private readonly telegramChatId: string;
 
   constructor(
     @InjectModel(Tweet.name) private tweetModel: Model<Tweet>,
     private readonly configService: ConfigService,
   ) {
     this.openai = new OpenAI({
-      apiKey: this.configService.get('openai.apiKey'),
+      baseURL: 'https://openrouter.ai/api/v1',
+      apiKey: this.configService.get('openrouter.apiKey'),
     });
+
+    this.telegramBotToken = this.configService.get<string>('telegram.botToken');
+    this.telegramChatId = this.configService.get<string>('telegram.chatId');
+
+    if (!this.telegramBotToken || !this.telegramChatId) {
+      this.logger.error('Telegram configuration is missing:', {
+        botToken: this.telegramBotToken ? 'Set' : 'Missing',
+        chatId: this.telegramChatId ? 'Set' : 'Missing',
+      });
+    }
   }
 
   async onModuleInit() {
@@ -45,18 +56,13 @@ export class IndicatorService implements OnModuleInit {
 
   private async startContinuousProcessing() {
     while (true) {
-      if (!this.isProcessing) {
-        try {
-          this.isProcessing = true;
-          await this.processTweets();
-          this.lastProcessedAt = new Date();
-        } catch (error) {
-          this.logger.error('Error in continuous processing:', error);
-        } finally {
-          this.isProcessing = false;
-        }
+      try {
+        await this.processTweets();
+      } catch (error) {
+        this.logger.error('Error in continuous processing:', error);
       }
-      await new Promise((resolve) => setTimeout(resolve, 5 * 60 * 1000)); // 5 minutes
+      
+      await new Promise((resolve) => setTimeout(resolve, 5 * 60 * 1000));
     }
   }
 
@@ -67,14 +73,13 @@ export class IndicatorService implements OnModuleInit {
 
     this.logger.log('Starting tweet analysis process');
 
-    // Get all non-indicated tweets first
     const tweets = await this.tweetModel
       .find({
         isIndicated: { $ne: true },
         indicator: { $exists: false },
       })
       .sort({ 'tweetDetail.tweetCreatedAt': -1 })
-      .limit(20);
+      .limit(100);
 
     if (tweets.length === 0) {
       this.logger.log('No new tweets to process');
@@ -115,14 +120,11 @@ export class IndicatorService implements OnModuleInit {
             tweet,
           );
 
-          if (
-            analysis.isTradeRelated &&
-            analysis.confidence >= 0.7 &&
-            !!analysis.type &&
-            !!analysis.entry &&
-            !!analysis.takeProfit &&
-            !!analysis.stopLoss
-          ) {
+          if (!analysis) {
+            continue;
+          }
+
+          if (analysis.isTradeRelated) {
             const indicatorData = {
               type: analysis.type,
               entry: analysis.entry,
@@ -154,6 +156,9 @@ export class IndicatorService implements OnModuleInit {
               },
             );
             successCount++;
+
+            void this.sendTelegramNotification(tweet, analysis);
+
             this.logger.log(
               `Successfully analyzed and updated tweet ${tweet.tweetDetail.id}`,
             );
@@ -215,55 +220,10 @@ Important validation rules:
    - How specific the analysis is about entry/target/stop levels
 
 Tweet: "${tweetText}"
-
-Return ONLY a JSON object with the following structure:
-{
-  "isTradeRelated": boolean,
-  "type": "long" | "short" | null,
-  "entry": number | null,
-  "takeProfit": number | null,
-  "stopLoss": number | null,
-  "timeframe": {
-    "type": "short" | "medium" | "long",
-    "duration": {
-      "value": number,
-      "unit": "hour" | "day" | "week"
-    }
-  } | null,
-  "confidence": number (0-1),
-  "reasoning": string
-}
-
-Example valid response:
-{
-  "isTradeRelated": true,
-  "type": "long",
-  "entry": 93500,
-  "takeProfit": 95000,
-  "stopLoss": 92000,
-  "timeframe": {
-    "type": "medium",
-    "duration": {
-      "value": 2,
-      "unit": "day"
-    }
-  },
-  "confidence": 0.85,
-  "reasoning": "Clear Bitcoin price chart with current price zone around ${this.bitcoinPrice}. Shows strong support at 93.5k with RSI divergence. Entry and risk levels are well-defined with good risk/reward ratio."
-}
-
-Example invalid responses that should return isTradeRelated=false:
-1. "Just bought some Bitcoin!" (no specific price levels)
-2. "Bitcoin hash rate reaching new highs" (not price related)
-3. "ETH looking bullish" (not Bitcoin)
-4. Price chart showing values very different from current Bitcoin price (likely old chart or different asset)
-5. Charts or metrics not related to price
-
-IMPORTANT: Return ONLY the JSON object, no additional text.`,
+`,
         },
       ];
 
-      // Add images if present
       if (tweet.tweetDetail.entities?.media?.length > 0) {
         for (const media of tweet.tweetDetail.entities.media) {
           if (media.mediaUrlHttps) {
@@ -283,21 +243,133 @@ IMPORTANT: Return ONLY the JSON object, no additional text.`,
       }
 
       const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini-2024-07-18',
+        model: 'openai/gpt-4o-mini',
         messages,
         temperature: 0,
         max_tokens: 1000,
-        response_format: { type: 'json_object' },
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'analysis',
+              description: 'Analyze Bitcoin trading signals from tweet',
+              parameters: {
+                type: 'object',
+                properties: {
+                  isTradeRelated: {
+                    type: 'boolean',
+                    description:
+                      'Whether the tweet contains specific Bitcoin price analysis or trading signals',
+                  },
+                  type: {
+                    type: 'string',
+                    enum: ['long', 'short', null],
+                    description: 'The type of trading signal',
+                  },
+                  entry: {
+                    type: 'number',
+                    description: 'The entry price for the trading signal',
+                    nullable: true,
+                  },
+                  takeProfit: {
+                    type: 'number',
+                    description: 'The take profit price for the trading signal',
+                    nullable: true,
+                  },
+                  stopLoss: {
+                    type: 'number',
+                    description: 'The stop loss price for the trading signal',
+                    nullable: true,
+                  },
+                  timeframe: {
+                    type: 'object',
+                    nullable: true,
+                    properties: {
+                      type: {
+                        type: 'string',
+                        enum: ['short', 'medium', 'long'],
+                        description: 'The timeframe type',
+                      },
+                      duration: {
+                        type: 'object',
+                        required: ['value', 'unit'],
+                        properties: {
+                          value: {
+                            type: 'number',
+                            description: 'The duration value',
+                          },
+                          unit: {
+                            type: 'string',
+                            enum: ['hour', 'day', 'week'],
+                            description: 'The duration unit',
+                          },
+                        },
+                      },
+                    },
+                    required: ['type', 'duration'],
+                  },
+                  confidence: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 1,
+                    description:
+                      'The confidence level of the trading signal (0-1)',
+                  },
+                  reasoning: {
+                    type: 'string',
+                    description: 'The reasoning behind the trading signal',
+                  },
+                },
+                required: ['isTradeRelated', 'confidence', 'reasoning'],
+              },
+            },
+          },
+        ],
+        tool_choice: {
+          type: 'function',
+          function: { name: 'analysis' },
+        },
       });
 
-      return JSON.parse(response.choices[0].message.content);
+      if (
+        !response?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments
+      ) {
+        return null;
+      }
+
+      try {
+        const analysis = JSON.parse(
+          response.choices[0].message.tool_calls[0].function.arguments,
+        );
+
+        if (
+          !analysis.isTradeRelated ||
+          analysis.confidence < 0.7 ||
+          !analysis.type ||
+          !analysis.entry ||
+          !analysis.takeProfit ||
+          !analysis.stopLoss
+        ) {
+          return {
+            isTradeRelated: false,
+          };
+        }
+
+        return analysis;
+      } catch (error) {
+        this.logger.error('Failed to parse AI response:', {
+          response: response.choices[0].message,
+          error,
+        });
+        return null;
+      }
     } catch (error) {
       if (retries > 0) {
         this.logger.warn(`Retrying AI analysis, ${retries} attempts remaining`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         return this._analyzeWithAI(tweetText, tweet, retries - 1);
       }
-      throw error;
+      return null;
     }
   }
 
@@ -307,11 +379,59 @@ IMPORTANT: Return ONLY the JSON object, no additional text.`,
         'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
       );
       const data = await response.json();
-      // Format price to always show full number
       return Number(data.price).toFixed(0);
     } catch (error) {
       this.logger.error('Error getting Bitcoin price:', error);
       return '';
+    }
+  }
+
+  private async sendTelegramNotification(
+    tweet: Tweet,
+    analysis: AIAnalysisResponse,
+  ) {
+    if (!this.telegramBotToken || !this.telegramChatId) {
+      this.logger.warn('Telegram bot token or chat ID not configured');
+      return;
+    }
+
+    try {
+      const formatPrice = (price: number) =>
+        price?.toLocaleString('en-US') || 'N/A';
+
+      const message = `🚨 <b>New Trading Signal</b>
+
+<b>Type:</b> ${analysis.type?.toUpperCase() || 'N/A'} 
+<b>Entry:</b> $${formatPrice(analysis.entry)}
+<b>Target:</b> $${formatPrice(analysis.takeProfit)}
+<b>Stop Loss:</b> $${formatPrice(analysis.stopLoss)}
+<b>Timeframe:</b> ${analysis.timeframe ? `${analysis.timeframe.duration.value} ${analysis.timeframe.duration.unit}(s)` : 'N/A'}
+<b>Confidence:</b> ${(analysis.confidence * 100).toFixed(1)}%
+
+🔗 <a href="https://bidicator.online">View Detail</a>
+`;
+
+      const url = `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: this.telegramChatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Telegram API error: ${error}`);
+      }
+    } catch (error) {
+      this.logger.error('Error sending Telegram notification:', error);
     }
   }
 }
