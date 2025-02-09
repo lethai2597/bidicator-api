@@ -61,7 +61,7 @@ export class IndicatorService implements OnModuleInit {
       } catch (error) {
         this.logger.error('Error in continuous processing:', error);
       }
-      
+
       await new Promise((resolve) => setTimeout(resolve, 5 * 60 * 1000));
     }
   }
@@ -115,10 +115,7 @@ export class IndicatorService implements OnModuleInit {
             `Tweet ${tweet.tweetDetail.id} is not bitcoin related`,
           );
         } else {
-          const analysis = await this._analyzeWithAI(
-            tweet.tweetDetail.fullText,
-            tweet,
-          );
+          const analysis = await this._analyzeTweet(tweet);
 
           if (!analysis) {
             continue;
@@ -157,7 +154,7 @@ export class IndicatorService implements OnModuleInit {
             );
             successCount++;
 
-            void this.sendTelegramNotification(tweet, analysis);
+            void this._sendTelegramNotification(tweet, analysis);
 
             this.logger.log(
               `Successfully analyzed and updated tweet ${tweet.tweetDetail.id}`,
@@ -191,23 +188,10 @@ export class IndicatorService implements OnModuleInit {
     `);
   }
 
-  private async _analyzeWithAI(
-    tweetText: string,
-    tweet: Tweet,
-    retries = 3,
-  ): Promise<AIAnalysisResponse> {
+  private async _analyzeTweet(tweet: Tweet): Promise<AIAnalysisResponse> {
     try {
-      const messages: any[] = [
-        {
-          role: 'system',
-          content:
-            'You are a cryptocurrency trading analyst specializing in Bitcoin price analysis. Your task is to identify valid Bitcoin price trading signals from tweets and images. Current Bitcoin price is ' +
-            this.bitcoinPrice +
-            ' USDT.',
-        },
-        {
-          role: 'user',
-          content: `Analyze this tweet for Bitcoin price trading signals. The current Bitcoin price is ${this.bitcoinPrice} USDT.
+      const systemPrompt = `
+You are a cryptocurrency trading analyst specializing in Bitcoin price analysis. Your task is to identify valid Bitcoin price trading signals from tweets and images. Current Bitcoin price is ${this.bitcoinPrice} USDT.
 
 Important validation rules:
 1. Only return isTradeRelated=true if the tweet contains specific Bitcoin PRICE analysis or trading signals
@@ -218,9 +202,16 @@ Important validation rules:
    - How clear the price signal is
    - How close the chart price range is to current Bitcoin price
    - How specific the analysis is about entry/target/stop levels
+`;
 
-Tweet: "${tweetText}"
-`,
+      const messages: any[] = [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+        {
+          role: 'user',
+          content: tweet.tweetDetail.fullText,
         },
       ];
 
@@ -364,11 +355,6 @@ Tweet: "${tweetText}"
         return null;
       }
     } catch (error) {
-      if (retries > 0) {
-        this.logger.warn(`Retrying AI analysis, ${retries} attempts remaining`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        return this._analyzeWithAI(tweetText, tweet, retries - 1);
-      }
       return null;
     }
   }
@@ -386,7 +372,7 @@ Tweet: "${tweetText}"
     }
   }
 
-  private async sendTelegramNotification(
+  private async _sendTelegramNotification(
     tweet: Tweet,
     analysis: AIAnalysisResponse,
   ) {
